@@ -7,6 +7,8 @@ export interface ExportSummary {
   mapsProcessed: number;
   collectionsWritten: number;
   featuresWritten: number;
+  featuresSkipped: number;
+  imagesDownloaded: number;
   duplicatesSkipped: number;
   duplicatesReplaced: number;
 }
@@ -23,6 +25,8 @@ export function createEmptySummary(
     mapsProcessed: 0,
     collectionsWritten: 0,
     featuresWritten: 0,
+    featuresSkipped: 0,
+    imagesDownloaded: 0,
     duplicatesSkipped: 0,
     duplicatesReplaced: 0,
   };
@@ -36,6 +40,8 @@ export function renderExportSummary(summary: ExportSummary): string {
     `maps processed: ${summary.mapsProcessed}`,
     `collections written: ${summary.collectionsWritten}`,
     `features written: ${summary.featuresWritten}`,
+    `features skipped: ${summary.featuresSkipped}`,
+    `images downloaded: ${summary.imagesDownloaded}`,
     `duplicates skipped: ${summary.duplicatesSkipped}`,
     `duplicates replaced: ${summary.duplicatesReplaced}`,
   ].join("\n");
