@@ -4,8 +4,10 @@ import {
   select,
   text,
 } from "@clack/prompts";
+import { styleText } from "node:util";
 import { CliError } from "../../core/errors.ts";
-import type { ExportMode, LayeringMode } from "../../domain/manifest.ts";
+import type { ExportMode, LayerMode, MapMode } from "../../domain/manifest.ts";
+import type { GenericFeatureCollection } from "../../formats/geojson.ts";
 import { resolveProjectName } from "../../utils/project.ts";
 
 export async function promptProjectSelection(existingProjects: string[]): Promise<string> {
@@ -42,9 +44,12 @@ export async function promptProjectSelection(existingProjects: string[]): Promis
   return resolveProjectName(name)!;
 }
 
-export async function promptReplaceOrExtend(): Promise<ExportMode> {
+export async function promptReplaceOrExtend(
+  existingCollections: GenericFeatureCollection[],
+): Promise<ExportMode> {
+  const collectionLabel = formatCollectionSummary(existingCollections);
   const mode = await select({
-    message: "Existing export found. Replace or extend?",
+    message: `Existing GeoJSON export found:\n\n${collectionLabel}\n\nReplace it or extend it?`,
     options: [
       { value: "replace", label: "Replace" },
       { value: "extend", label: "Extend" },
@@ -58,12 +63,12 @@ export async function promptReplaceOrExtend(): Promise<ExportMode> {
   return mode;
 }
 
-export async function promptLayeringMode(): Promise<LayeringMode> {
+export async function promptMapMode(): Promise<MapMode> {
   const mode = await select({
-    message: "How should the source maps be stored?",
+    message: "How should multiple maps in this project be handled?",
     options: [
-      { value: "same", label: "Combine into one feature collection" },
-      { value: "separate", label: "Write separate feature collections" },
+      { value: "combine", label: "Combine maps", hint: "Distinct Google Maps can contribute to the same GeoJSON" },
+      { value: "keepSeparate", label: "Keep maps separate", hint: "Each Google Map keeps its own GeoJSON" },
     ],
   });
 
@@ -72,6 +77,68 @@ export async function promptLayeringMode(): Promise<LayeringMode> {
   }
 
   return mode;
+}
+
+export async function promptLayerMode(
+  mapMode: MapMode,
+  sourceCount: number,
+  existingCollectionCount: number,
+): Promise<LayerMode> {
+  const shouldOfferCombinedLayerModes = mapMode === "combine" &&
+    (sourceCount > 1 || existingCollectionCount > 1);
+  const options: Array<{ value: LayerMode; label: string; hint: string }> = !shouldOfferCombinedLayerModes
+    ? [
+      {
+        value: "flatten",
+        label: "Flatten layers into one file",
+        hint: "All layers will be combined into one GeoJSON file.",
+      },
+      {
+        value: "asIs",
+        label: "Leave layers as-is",
+        hint: "Each top-level layer becomes its own GeoJSON file.",
+      },
+    ]
+    : mapMode === "combine"
+    ? [
+      {
+        value: "flatten",
+        label: "Flatten layers",
+        hint: "All layers will be combined into a single layer",
+      },
+      {
+        value: "groupByName",
+        label: "Combine layers with same name",
+        hint: "Only merge layers when their names are identical across maps",
+      },
+      {
+        value: "asIs",
+        label: "Leave layers untouched",
+        hint: "All layers remain intact; duplicate layer names get a map-title suffix",
+      },
+    ]
+    : [
+      {
+        value: "flatten",
+        label: "Keep maps separate, Flatten layers",
+        hint: "Each map becomes one GeoJSON file with all of its layers combined.",
+      },
+      {
+        value: "asIs",
+        label: "Keep maps separate, Leave layers as-is",
+        hint: "Each map-layer pair becomes its own GeoJSON file.",
+      },
+    ];
+  const mode = await select({
+    message: "How should layers be written?",
+    options,
+  });
+
+  if (isCancel(mode)) {
+    throw new CliError("Export cancelled.");
+  }
+
+  return mode as LayerMode;
 }
 
 export async function promptMapUrls(): Promise<string[]> {
@@ -97,9 +164,9 @@ export async function promptMapUrls(): Promise<string[]> {
     .filter(Boolean);
 }
 
-export async function promptDuplicatePolicy(): Promise<"replace" | "skip"> {
+export async function promptDuplicatePolicy(duplicateCount: number): Promise<"replace" | "skip"> {
   const value = await select({
-    message: "Duplicate features were found. How should they be handled?",
+    message: `${duplicateCount} duplicate features were found. How should they be handled?`,
     options: [
       { value: "replace", label: "Replace duplicate features" },
       { value: "skip", label: "Skip duplicate features" },
@@ -177,4 +244,55 @@ export async function promptHypeUser(): Promise<{ email: string; id: string }> {
     email: values.email.trim(),
     id: values.id.trim(),
   };
+}
+
+function formatCollectionSummary(existingCollections: GenericFeatureCollection[]): string {
+  return existingCollections
+    .map((collection) => formatCollectionLabel(collection))
+    .join("\n");
+}
+
+function formatMapTitles(collection: GenericFeatureCollection): string {
+  const metadata = collection.metadata as {
+    maps?: Array<{ title?: string }>;
+    map?: { title?: string };
+  } | undefined;
+  const titles = [
+    ...(metadata?.maps?.flatMap((map) => {
+      const title = map.title?.trim();
+      return title ? [title] : [];
+    }) ?? []),
+    ...(metadata?.map?.title?.trim() ? [metadata.map.title.trim()] : []),
+  ];
+  const uniqueTitles = [...new Set(titles)];
+  return uniqueTitles.length > 0 ? humanJoin(uniqueTitles) : "Untitled map";
+}
+
+function humanJoin(values: string[]): string {
+  if (values.length <= 1) {
+    return values[0] ?? "";
+  }
+
+  if (values.length === 2) {
+    return `${values[0]} and ${values[1]}`;
+  }
+
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
+}
+
+function formatCollectionLabel(collection: GenericFeatureCollection): string {
+  const mapName = formatMapTitles(collection);
+  const layerName = formatLayerName(collection);
+  const featureCount = String(collection.features.length);
+  return `${styleText("red", mapName.trim())}: ${styleText("yellow", layerName.trim())} ${
+    styleText("gray", "(")
+  }${styleText("white", featureCount)}${styleText("gray", " features)")}`;
+}
+
+function formatLayerName(collection: GenericFeatureCollection): string {
+  const metadata = collection.metadata as {
+    layer?: { name?: string };
+  } | undefined;
+  const name = metadata?.layer?.name?.trim();
+  return name || "Untitled layer";
 }

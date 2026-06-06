@@ -2,7 +2,8 @@ import { confirm, isCancel, note, spinner } from "@clack/prompts";
 import { parseArgs, getStringArrayFlag, getStringFlag } from "../args.ts";
 import {
   promptDuplicatePolicy,
-  promptLayeringMode,
+  promptLayerMode,
+  promptMapMode,
   promptMapUrls,
   promptProjectSelection,
   promptReplaceOrExtend,
@@ -13,15 +14,21 @@ import {
   createDefaultManifest,
   loadManifest,
   saveManifest,
-  type ExportManifest,
   type ExportMode,
-  type LayeringMode,
+  type LayerMode,
+  type MapMode,
 } from "../../domain/manifest.ts";
 import { computeCollectionWrites, mergeCollectionWrites } from "../../transform/generic.ts";
-import { loadExistingCollections, writeCollections } from "../../formats/geojson.ts";
+import { countFeatureDuplicates } from "../../transform/dedupe.ts";
+import {
+  loadExistingCollections,
+  writeCollections,
+  type GenericFeatureCollection,
+} from "../../formats/geojson.ts";
 import { resolveProjectName } from "../../utils/project.ts";
 import { fetchGoogleMyMapsSource } from "../../extract/google-mymaps.ts";
 import { createEmptySummary, renderExportSummary } from "../../core/summary.ts";
+import type { ImageDownloadProgress } from "../../transform/images.ts";
 
 export async function runExportCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv);
@@ -33,13 +40,11 @@ export async function runExportCommand(argv: string[]): Promise<void> {
   const paths = getProjectPaths(project);
   await ensureProjectDirs(paths);
 
+  const existingCollections = await loadExistingCollections(paths.mapsDir);
   const existingManifest = await loadManifest(paths.manifestFile);
   const mode =
     normalizeExportMode(getStringFlag(parsed.flags, "mode")) ??
-    (await decideMode(existingManifest));
-  const layering =
-    normalizeLayeringMode(getStringFlag(parsed.flags, "layering")) ??
-    (await promptLayeringMode());
+    (await decideMode(existingCollections));
 
   const sourceUrls = dedupeUrls(
     getStringArrayFlag(parsed.flags, "url").length > 0
@@ -50,6 +55,13 @@ export async function runExportCommand(argv: string[]): Promise<void> {
   if (sourceUrls.length === 0) {
     throw new CliError("At least one Google My Maps URL is required.");
   }
+
+  const mapMode =
+    normalizeMapMode(getStringFlag(parsed.flags, "map-mode")) ??
+    (await decideMapMode(sourceUrls.length));
+  const layerMode =
+    normalizeLayerMode(getStringFlag(parsed.flags, "layer-mode")) ??
+    (await decideLayerMode(mapMode, sourceUrls.length, existingCollections.length));
 
   const manifest = mode === "replace" || !existingManifest
     ? createDefaultManifest(project)
@@ -67,27 +79,37 @@ export async function runExportCommand(argv: string[]): Promise<void> {
     }
   }
 
-  const summary = createEmptySummary(project, mode, layering);
+  const summary = createEmptySummary(project, mode, mapMode, layerMode);
   const spin = spinner();
   const sources = [];
 
   spin.start("Resolving source maps");
   for (const url of sourceUrls) {
-    const source = await fetchGoogleMyMapsSource(url, paths.imagesDir, summary);
+    spin.message(`Resolving source map ${summary.mapsProcessed + 1}/${sourceUrls.length}`);
+    const source = await fetchGoogleMyMapsSource(
+      url,
+      paths.imagesDir,
+      summary,
+      (progress) => {
+        spin.message(formatImageProgress(progress));
+      },
+    );
     sources.push(source);
     summary.mapsProcessed += 1;
   }
   spin.stop("Source map metadata resolved");
 
-  const collectionWrites = computeCollectionWrites(sources, layering);
-  const existingCollections =
-    mode === "extend" ? await loadExistingCollections(paths.mapsDir) : [];
+  const collectionWrites = computeCollectionWrites(project, sources, mapMode, layerMode);
+  const collectionsToMerge =
+    mode === "extend" ? existingCollections : [];
+  const duplicateCount =
+    mode === "extend" ? countCollectionDuplicates(collectionsToMerge, collectionWrites) : 0;
   const duplicatePolicy: "replace" | "skip" =
-    mode === "extend" && existingCollections.length > 0
-      ? await promptDuplicatePolicy()
+    duplicateCount > 0
+      ? await promptDuplicatePolicy(duplicateCount)
       : "skip";
   const mergedCollections = mergeCollectionWrites(
-    existingCollections,
+    collectionsToMerge,
     collectionWrites,
     duplicatePolicy,
     summary,
@@ -104,7 +126,8 @@ export async function runExportCommand(argv: string[]): Promise<void> {
   manifest.project = project;
   manifest.updatedAt = new Date().toISOString();
   manifest.mode = mode;
-  manifest.layering = layering;
+  manifest.mapMode = mapMode;
+  manifest.layerMode = layerMode;
   manifest.collections = mergedCollections.map((collection) => ({
     id: collection.id,
     filename: collection.filename,
@@ -125,22 +148,74 @@ function normalizeExportMode(value?: string): ExportMode | undefined {
   return undefined;
 }
 
-function normalizeLayeringMode(value?: string): LayeringMode | undefined {
-  if (value === "same" || value === "separate") {
+function normalizeMapMode(value?: string): MapMode | undefined {
+  if (value === "combine" || value === "keepSeparate") {
     return value;
   }
 
   return undefined;
 }
 
-async function decideMode(manifest: ExportManifest | null): Promise<ExportMode> {
-  if (!manifest) {
+function normalizeLayerMode(value?: string): LayerMode | undefined {
+  if (value === "flatten" || value === "groupByName" || value === "asIs") {
+    return value;
+  }
+
+  return undefined;
+}
+
+async function decideMode(
+  existingCollections: GenericFeatureCollection[],
+): Promise<ExportMode> {
+  if (existingCollections.length === 0) {
     return "replace";
   }
 
-  return promptReplaceOrExtend();
+  return promptReplaceOrExtend(existingCollections);
+}
+
+async function decideMapMode(sourceCount: number): Promise<MapMode> {
+  if (sourceCount <= 1) {
+    return "combine";
+  }
+
+  return promptMapMode();
+}
+
+async function decideLayerMode(
+  mapMode: MapMode,
+  sourceCount: number,
+  existingCollectionCount: number,
+): Promise<LayerMode> {
+  return promptLayerMode(mapMode, sourceCount, existingCollectionCount);
 }
 
 function dedupeUrls(urls: string[]): string[] {
   return [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
+}
+
+function formatImageProgress(progress: ImageDownloadProgress): string {
+  const [current, ...rest] = progress.activeFeatures;
+  if (!current) {
+    return `Downloading images ${progress.completed}/${progress.total}: Waiting for image downloads`;
+  }
+
+  const suffix = rest.length > 0 ? ` + ${rest.length} to go` : "";
+  return `Downloading images ${progress.completed}/${progress.total}: ${current.name}${suffix}`;
+}
+
+function countCollectionDuplicates(
+  existing: GenericFeatureCollection[],
+  incoming: GenericFeatureCollection[],
+): number {
+  const existingByFilename = new Map(existing.map((collection) => [collection.filename, collection]));
+
+  return incoming.reduce((count, collection) => {
+    const current = existingByFilename.get(collection.filename);
+    if (!current) {
+      return count;
+    }
+
+    return count + countFeatureDuplicates(current.features, collection.features);
+  }, 0);
 }
