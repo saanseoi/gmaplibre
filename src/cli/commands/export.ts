@@ -200,7 +200,7 @@ function formatImageProgress(progress: ImageDownloadProgress): string {
     return `Downloading images ${progress.completed}/${progress.total}: Waiting for image downloads`;
   }
 
-  const suffix = rest.length > 0 ? ` + ${rest.length} to go` : "";
+  const suffix = rest.length > 0 ? ` with ${rest.length} to go` : "";
   return `Downloading images ${progress.completed}/${progress.total}: ${current.name}${suffix}`;
 }
 

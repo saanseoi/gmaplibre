@@ -1,5 +1,8 @@
 import type { ExportMode, LayerMode, MapMode } from "../domain/manifest.ts";
 
+const CYAN = "\u001B[36m";
+const RESET = "\u001B[0m";
+
 export interface ExportSummary {
   project: string;
   mode: ExportMode;
@@ -37,17 +40,17 @@ export function createEmptySummary(
 
 export function renderExportSummary(summary: ExportSummary): string {
   return [
-    `project: ${summary.project}`,
-    `mode: ${summary.mode}`,
-    `maps: ${summary.mapMode}`,
-    `layers: ${summary.layerMode}`,
-    `maps processed: ${summary.mapsProcessed}`,
-    `collections written: ${summary.collectionsWritten}`,
-    `features written: ${summary.featuresWritten}`,
-    `features skipped: ${summary.featuresSkipped}`,
-    `images downloaded: ${summary.imagesDownloaded}`,
-    `duplicates skipped: ${summary.duplicatesSkipped}`,
-    `duplicates replaced: ${summary.duplicatesReplaced}`,
+    formatSummaryLine("Project", summary.project),
+    formatSummaryLine("Mode", summary.mode),
+    formatSummaryLine("Maps", summary.mapMode),
+    formatSummaryLine("Layers", summary.layerMode),
+    formatSummaryLine("Maps Processed", summary.mapsProcessed),
+    formatSummaryLine("Collections Written", summary.collectionsWritten),
+    formatSummaryLine("Features Written", summary.featuresWritten),
+    formatSummaryLine("Features Skipped", summary.featuresSkipped),
+    formatSummaryLine("Images Downloaded", summary.imagesDownloaded),
+    formatSummaryLine("Duplicates Skipped", summary.duplicatesSkipped),
+    formatSummaryLine("Duplicates Replaced", summary.duplicatesReplaced),
   ].join("\n");
 }
 
@@ -79,9 +82,13 @@ export function createHypeSummary(
 
 export function renderHypeSummary(summary: HypeSummary): string {
   return [
-    `locale: ${summary.locale}`,
-    `OK: ${summary.ok}`,
-    `ERROR: ${summary.error}`,
-    `SKIP: ${summary.skip}`,
+    formatSummaryLine("Locale", summary.locale),
+    formatSummaryLine("OK", summary.ok),
+    formatSummaryLine("ERROR", summary.error),
+    formatSummaryLine("SKIP", summary.skip),
   ].join("\n");
+}
+
+function formatSummaryLine(key: string, value: string | number): string {
+  return `${CYAN}${key}:${RESET} ${value}`;
 }
