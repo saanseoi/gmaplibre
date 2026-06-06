@@ -1,7 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 export type ExportMode = "replace" | "extend";
-export type LayeringMode = "same" | "separate";
+export type MapMode = "combine" | "keepSeparate";
+export type LayerMode = "flatten" | "groupByName" | "asIs";
 
 export interface ManifestCollectionRecord {
   id: string;
@@ -15,7 +16,8 @@ export interface ExportManifest {
   createdAt: string;
   updatedAt: string;
   mode: ExportMode;
-  layering: LayeringMode;
+  mapMode: MapMode;
+  layerMode: LayerMode;
   sourceUrls: string[];
   collections: ManifestCollectionRecord[];
 }
@@ -27,7 +29,8 @@ export function createDefaultManifest(project: string): ExportManifest {
     createdAt: now,
     updatedAt: now,
     mode: "replace",
-    layering: "same",
+    mapMode: "combine",
+    layerMode: "flatten",
     sourceUrls: [],
     collections: [],
   };
