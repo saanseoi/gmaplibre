@@ -24,6 +24,14 @@ export function computeCollectionWrites(
         type: "FeatureCollection",
         id: "combined",
         filename: "combined.geojson",
+        metadata: {
+          maps: sources.map((map) => ({
+            id: map.id,
+            title: map.title,
+            description: map.description,
+            originalUrl: map.originalUrl,
+          })),
+        },
         features,
       },
     ];
@@ -34,6 +42,18 @@ export function computeCollectionWrites(
       type: "FeatureCollection" as const,
       id: `${map.id}-${layer.id}`,
       filename: `${slugify(map.title)}-${slugify(layer.name)}.geojson`,
+      metadata: {
+        map: {
+          id: map.id,
+          title: map.title,
+          description: map.description,
+          originalUrl: map.originalUrl,
+        },
+        layer: {
+          id: layer.id,
+          name: layer.name,
+        },
+      },
       features: layer.features.map((feature) => featureToGeoJson(feature, map.title, layer.name)),
     })),
   );
@@ -56,6 +76,7 @@ export function mergeCollectionWrites(
 
     byFilename.set(collection.filename, {
       ...current,
+      metadata: current.metadata ?? collection.metadata,
       features: mergeFeatures(current.features, collection.features, duplicatePolicy, summary),
     });
   }

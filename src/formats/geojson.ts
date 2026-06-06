@@ -33,6 +33,7 @@ export interface GenericFeatureCollection {
   type: "FeatureCollection";
   id: string;
   filename: string;
+  metadata?: Record<string, unknown>;
   features: GenericFeature[];
 }
 
@@ -71,6 +72,7 @@ export async function writeCollections(
           {
             type: collection.type,
             id: collection.id,
+            metadata: collection.metadata,
             features: collection.features,
           },
           null,
