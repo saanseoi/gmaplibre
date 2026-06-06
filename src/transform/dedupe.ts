@@ -31,3 +31,19 @@ export function mergeFeatures(
 
   return [...byKey.values()];
 }
+
+export function countFeatureDuplicates(
+  existing: GenericFeature[],
+  incoming: GenericFeature[],
+): number {
+  const keys = new Set(existing.map((feature) => feature.properties.sourceRef.sourceFeatureKey));
+  let duplicates = 0;
+
+  for (const feature of incoming) {
+    if (keys.has(feature.properties.sourceRef.sourceFeatureKey)) {
+      duplicates += 1;
+    }
+  }
+
+  return duplicates;
+}
