@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import { customAlphabet } from "nanoid";
+
+const createNanoId = customAlphabet(
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  12,
+);
 
 export function resolveProjectName(value?: string): string | null {
   if (!value) {
@@ -18,10 +24,7 @@ export function slugify(value: string): string {
 }
 
 export function createFeatureId(): string {
-  return createHash("sha256")
-    .update(`${Date.now()}-${Math.random()}`)
-    .digest("base64url")
-    .slice(0, 12);
+  return createNanoId();
 }
 
 export function hashValue(value: string): string {
